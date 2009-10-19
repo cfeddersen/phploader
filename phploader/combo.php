@@ -41,7 +41,7 @@ function server()
 
 $queryString = getenv('QUERY_STRING') ? urldecode(getenv('QUERY_STRING')) : '';
 if (isset($queryString) && !empty($queryString)) {
-    $yuiFiles    = explode("&amp;", $queryString);
+    $yuiFiles    = explode("&", $queryString);
     $contentType = strpos($yuiFiles[0], ".js") ? 'application/x-javascript' : ' text/css';
     
     //Use the first module to determine which version of the YUI meta info to load
