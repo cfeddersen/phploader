@@ -1,5 +1,5 @@
 <?php $GLOBALS['yui_current'] = array (
-  'base' => 'http://yui.yahooapis.com/2.8.0/build/',
+  'base' => 'http://yui.yahooapis.com/2.8.0r4/build/',
   'skin' => 
   array (
     'defaultSkin' => 'sam',

@@ -69,7 +69,8 @@ class YAHOO_util_Loader {
     var $target = "";
 
     /**
-    * Combined into a single request using the combo service to pontentially reduce the number of http requests required.
+    * Combined into a single request using the combo service to pontentially reduce the number of 
+    * http requests required.  This option is not supported when loading custom modules.
     * @property combine
     * @type boolean
     * @default false
@@ -224,9 +225,9 @@ class YAHOO_util_Loader {
         $this->curlAvail  = function_exists('curl_exec');
         $this->apcAvail   = function_exists('apc_fetch');
         $this->jsonAvail  = function_exists('json_encode');
-        $this->embedAvail = ($this->curlAvail && $this->apcAvail);
+        $this->customModulesInUse = empty($modules) ? false : true;
         $this->base = $yui_current[YUI_BASE];
-        $this->comboDefaultVersion = $yuiVersion; //(ex) 2.7.0
+        $this->comboDefaultVersion = $yuiVersion; //$customModules
         $this->fullCacheKey = null;
         $cache = null;
 
@@ -424,7 +425,7 @@ class YAHOO_util_Loader {
     /**
     * Used to output each of the required link tags
     * @method css
-    * @return {string} (e.g.)
+    * @return {string}
     */
     function css() {
         return $this->tags(YUI_CSS);
@@ -580,13 +581,10 @@ class YAHOO_util_Loader {
     }
 
     function log($msg) {
-        //error_log($msg, 3, "yui_loader_log.txt");
         error_log($msg, 0);
-        //print_r("<p>" . $msg . "</p>");
     }
     
     function accountFor($name) {
-
         //$this->log("accountFor: " . $name);
         $this->accountedFor[$name] = $name;
         
@@ -698,9 +696,16 @@ class YAHOO_util_Loader {
         }    
 
         return $skinName;
-
     }
-
+    
+    /**
+    * Identify dependencies for a give module name
+    * @method getAllDependencies
+    * @param {string} mname Module name
+    * @param {boolean} loadOptional Load optional dependencies
+    * @param {array} completed
+    * @return {array}
+    */
     function getAllDependencies($mname, $loadOptional=false, $completed=array()) {
 
         // $this->log("Building deps list for " . $mname);
@@ -865,9 +870,6 @@ class YAHOO_util_Loader {
         foreach ($globals as $name=>$dep) {
             $reqs[$name] = true;
         }
-
-        //print_r($this->requests);
-        //return;
 
         // get and store the full list of dependencies.
         foreach ($this->requests as $name=>$val) {
@@ -1208,8 +1210,8 @@ class YAHOO_util_Loader {
                         $item[YUI_OPTIONAL] = $dep[YUI_OPTIONAL];
                         break;
                     case YUI_TAGS:
-                    default: 
-                        if ($this->combine === true) {
+                    default:
+                        if ($this->combine === true && $this->customModulesInUse === false) {
                             $this->addToCombo($name, $dep[YUI_TYPE]);
                             $html = $this->getComboLink($dep[YUI_TYPE]);
                         } else {
@@ -1303,11 +1305,14 @@ class YAHOO_util_Loader {
     * Retrieve the contents of a remote resource
     * @method getRemoteContent
     * @param {string} url URL to fetch data from
-    * @return
+    * @return raw source
     */
     function getRemoteContent($url) {
-
-        $remote_content = apc_fetch($url);
+        
+        $remote_content = null;
+        if ($this->apcAvail === true) {
+            $remote_content = apc_fetch($url);
+        }        
 
         if (!$remote_content) {
 
@@ -1330,32 +1335,44 @@ class YAHOO_util_Loader {
             //$this->log("CONTENT: " . $remote_content);
 
             // save the contents of the remote url for 30 minutes
-            apc_store($url, $remote_content, $this->apcttl);
+            if ($this->apcAvail === true) {
+                apc_store($url, $remote_content, $this->apcttl);
+            }
 
             curl_close ($ch);
         }
 
         return $remote_content;
     }
-
-    function getRaw($name) {
-        if (!$this->embedAvail) {
-            return "cURL and/or APC was not detected, so the content can't be embedded";
+    
+    /**
+    * Retrieve the raw source contents for a given module name
+    * @method getRaw
+    * @param {string} name The module name you wish to fetch the source from
+    * @return {string} raw source
+    */
+    function getRaw($name) {        
+        if(!$this->curlAvail) {
+            return "<!--// cURL was not detected, so the content cannot be fetched -->";
         }
 
         $url = $this->getUrl($name);
         return $this->getRemoteContent($url);
     }
 
+    /**
+    * Retrieve the style or script node with embedded source for a given module name and resource type
+    * @method getContent
+    * @param {string} name The module name to fetch the source from
+    * @param {string} type Resource type (i.e.) YUI_JS or YUI_CSS
+    * @return {string} style or script node with embedded source
+    */
     function getContent($name, $type) {
-
-        if(!$this->embedAvail) {
-            return "<!--// cURL was not detected, so the content can't be embedded -->" . $this->getLink($name, $type);
+        if(!$this->curlAvail) {
+            return "<!--// cURL was not detected, so the content cannot be fetched/embedded -->" . $this->getLink($name, $type);
         }
 
         $url = $this->getUrl($name);
-
-        //$this->log("URL: " . $url);
 
         if (!$url) {
             return '<!-- PATH FOR "'. $name . '" NOT SPECIFIED -->';
@@ -1364,11 +1381,16 @@ class YAHOO_util_Loader {
         } else {
             return '<script type="text/javascript">' . $this->getRemoteContent($url) . '</script>'; 
         }
-
     }
-
+    
+    /**
+    * Retrieve the link or script include for a given module name and resource type
+    * @method getLink
+    * @param {string} name The module name to fetch the include for
+    * @param {string} type Resource type (i.e.) YUI_JS or YUI_CSS
+    * @return {string} link or script include
+    */
     function getLink($name, $type) {
-
         $url = $this->getUrl($name);
 
         if (!$url) {
@@ -1380,6 +1402,12 @@ class YAHOO_util_Loader {
         }
     }
   
+    /**
+    * Retrieves the combo link or script include for the currently loaded modules of a specific resource type
+    * @method getComboLink
+    * @param {string} type Resource type (i.e.) YUI_JS or YUI_CSS
+    * @return {string} link or script include
+    */
     function getComboLink($type) {
         $url = '';
         
@@ -1413,6 +1441,12 @@ class YAHOO_util_Loader {
         return $url;
     }
     
+    /**
+    * Adds a module the combo collection for a specified resource type
+    * @method addToCombo
+    * @param {string} name The module name to add
+    * @param {string} type Resource type (i.e.) YUI_JS or YUI_CSS
+    */
     function addToCombo($name, $type) {
         $pathToModule = $this->comboDefaultVersion . '/build/' . $this->modules[$name][YUI_PATH];
         if ($type == YUI_CSS) {
@@ -1434,10 +1468,21 @@ class YAHOO_util_Loader {
         }
     }
   
+    /**
+    * Detects if environment supports JSON encode/decode
+    * @method canJSON
+    * @return boolean
+    */
     function canJSON() {
         return $this->jsonAvail;
     }
-
+    
+    /**
+    * Identifies what module(s) are provided by a given module name (e.g.) yaho-dom-event provides yahoo, dom, and event
+    * @method getProvides
+    * @param {string} name Module name
+    * @return {array}
+    */
     function getProvides($name) {
         $p = array($name);
         if (isset($this->modules[$name])) {
@@ -1451,7 +1496,12 @@ class YAHOO_util_Loader {
 
         return $p;
     }
-
+    
+    /**
+    * Identifies what module(s) have been loaded via the load method and/or marked as loaded via the setLoaded method
+    * @method getLoadedModules
+    * @return {array}
+    */
     function getLoadedModules() {
         $loaded = array();
         foreach ($this->loaded as $i=>$value) {
@@ -1468,6 +1518,11 @@ class YAHOO_util_Loader {
         return $loaded;
     }
 
+    /**
+    * Identifies what module(s) have been loaded via the load method and/or marked as loaded via the setLoaded method
+    * @method getLoadedModulesAsJSON
+    * @return {json}
+    */
     function getLoadedModulesAsJSON() {
         if (!$this->canJSON()) {
             return "{\"Error\", \"json library not available\"}";
